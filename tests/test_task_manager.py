@@ -4,10 +4,11 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+import zipfile
 
 from app.cli import main as cli_main
 from app.core.batch.task_manager import TaskManager
-from app.core.models import AppConfig
+from app.core.models import AppConfig, Chapter
 from app.storage.task_repository import TaskRepository
 
 
@@ -95,6 +96,27 @@ class TaskManagerTest(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertTrue((output_dir / "demo.epub").exists())
             self.assertTrue((output_dir / "page.epub").exists())
+
+    def test_conversion_uses_edited_chapters(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "demo.txt"
+            source.write_text("第一章\n原始内容", encoding="utf-8")
+            manager = TaskManager(
+                AppConfig(output_dir=str(root / "out")),
+                TaskRepository(root / "tasks.sqlite3"),
+            )
+            task = manager.create_task(source)
+            task.edited_chapters = [Chapter(1, "改后章节", "编辑后的内容")]
+
+            manager.convert_task(task)
+
+            self.assertEqual(task.status, "完成")
+            epub_path = root / "out" / "demo.epub"
+            with zipfile.ZipFile(epub_path) as archive:
+                chapter = archive.read("OEBPS/chapters/chapter001.xhtml").decode("utf-8")
+            self.assertIn("改后章节", chapter)
+            self.assertIn("编辑后的内容", chapter)
 
 
 if __name__ == "__main__":

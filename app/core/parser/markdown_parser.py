@@ -37,24 +37,40 @@ class MarkdownParser:
 
     def _chapters_from_markdown(self, text: str) -> list[Chapter]:
         chapters: list[Chapter] = []
+        current_volume = ""
         current_title = "正文"
         current_lines: list[str] = []
 
         for line in text.replace("\r\n", "\n").replace("\r", "\n").splitlines():
             match = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
             if match and len(match.group(1)) <= 2:
-                if current_lines or chapters:
-                    chapters.append(self._build_chapter(len(chapters) + 1, current_title, current_lines))
-                current_title = match.group(2).strip()
+                heading = match.group(2).strip()
+                if len(match.group(1)) == 1 and self._is_volume_heading(heading):
+                    if current_lines or current_title != "正文":
+                        chapters.append(
+                            self._build_chapter(len(chapters) + 1, current_title, current_lines, current_volume)
+                        )
+                    current_volume = heading
+                    current_title = "正文"
+                    current_lines = []
+                    continue
+                if current_lines or current_title != "正文":
+                    chapters.append(self._build_chapter(len(chapters) + 1, current_title, current_lines, current_volume))
+                current_title = heading
                 current_lines = []
             else:
                 current_lines.append(line)
         if current_lines or not chapters:
-            chapters.append(self._build_chapter(len(chapters) + 1, current_title, current_lines))
+            chapters.append(self._build_chapter(len(chapters) + 1, current_title, current_lines, current_volume))
         return chapters
 
-    def _build_chapter(self, index: int, title: str, lines: list[str]) -> Chapter:
-        return Chapter(index, title, self._to_xhtml(lines), "xhtml")
+    def _build_chapter(self, index: int, title: str, lines: list[str], volume_title: str = "") -> Chapter:
+        return Chapter(index, title, self._to_xhtml(lines), "xhtml", volume_title)
+
+    def _is_volume_heading(self, heading: str) -> bool:
+        from app.core.chapter.rules import is_volume_title
+
+        return is_volume_title(heading)
 
     def _to_xhtml(self, lines: list[str]) -> str:
         blocks: list[str] = []

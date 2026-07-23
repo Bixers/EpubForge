@@ -2,15 +2,11 @@ from __future__ import annotations
 
 import re
 
+from app.core.chapter.rules import DEFAULT_CHAPTER_RULES, compile_rule_patterns, is_volume_title
 from app.core.models import Chapter
 
 
-DEFAULT_CHAPTER_REGEX = r"^(第[一二三四五六七八九十百千万0-9]+[章节回卷部].*)$"
-EXTRA_TITLE_REGEXES = [
-    r"^(序章|楔子|前言|正文|尾声|后记)$",
-    r"^(番外.*)$",
-    r"^(Chapter\s+\d+.*)$",
-]
+DEFAULT_CHAPTER_REGEX = DEFAULT_CHAPTER_RULES[0].pattern
 
 
 class ChapterDetector:
@@ -35,24 +31,43 @@ class ChapterDetector:
         return self._by_heading(text, pattern)
 
     def _by_heading(self, text: str, pattern: str) -> list[Chapter]:
-        compiled = re.compile(pattern, re.IGNORECASE)
-        extras = [re.compile(item, re.IGNORECASE) for item in EXTRA_TITLE_REGEXES]
+        patterns = compile_rule_patterns(self.custom_regex) if self.rule != "custom" else [
+            re.compile(item, re.IGNORECASE) for item in [pattern] if item
+        ]
         chapters: list[Chapter] = []
+        current_volume = ""
         current_title = "正文"
         current_lines: list[str] = []
 
         for line in text.splitlines():
             stripped = line.strip()
-            is_title = bool(stripped and compiled.match(stripped))
-            if not is_title:
-                is_title = any(regex.match(stripped) for regex in extras)
+            is_title = bool(stripped and any(regex.match(stripped) for regex in patterns))
             if stripped == "正文" and self._is_numbered_chapter_title(current_title):
                 is_title = False
 
             if is_title:
-                if current_lines or chapters or current_title != "正文":
+                if is_volume_title(stripped):
+                    if current_lines or current_title != "正文":
+                        chapters.append(
+                            Chapter(
+                                len(chapters) + 1,
+                                current_title,
+                                "\n".join(current_lines).strip(),
+                                volume_title=current_volume,
+                            )
+                        )
+                    current_volume = stripped
+                    current_title = "正文"
+                    current_lines = []
+                    continue
+                if current_lines or current_title != "正文":
                     chapters.append(
-                        Chapter(len(chapters) + 1, current_title, "\n".join(current_lines).strip())
+                        Chapter(
+                            len(chapters) + 1,
+                            current_title,
+                            "\n".join(current_lines).strip(),
+                            volume_title=current_volume,
+                        )
                     )
                 current_title = stripped
                 current_lines = []
@@ -61,15 +76,25 @@ class ChapterDetector:
 
         if current_lines or not chapters:
             chapters.append(
-                Chapter(len(chapters) + 1, current_title, "\n".join(current_lines).strip())
+                Chapter(
+                    len(chapters) + 1,
+                    current_title,
+                    "\n".join(current_lines).strip(),
+                    volume_title=current_volume,
+                )
             )
 
         return [chapter for chapter in chapters if chapter.content or chapter.title]
 
     def _is_numbered_chapter_title(self, title: str) -> bool:
-        if re.match(DEFAULT_CHAPTER_REGEX, title, re.IGNORECASE):
-            return True
-        return bool(re.match(r"^Chapter\s+\d+.*$", title, re.IGNORECASE))
+        numbered_patterns = [
+            r"^第[一二三四五六七八九十百千万两0-9]+[章节回卷部].*$",
+            r"^[卷部][一二三四五六七八九十百千万两0-9]+.*$",
+            r"^[0-9]{1,4}[\.．、]\s*.+$",
+            r"^(章节?\s*)?[0-9]{1,4}\s+.+$",
+            r"^(chapter|part|volume|book)\s+[0-9ivxlcdm]+[:\.\-\s].*$",
+        ]
+        return any(re.match(pattern, title, re.IGNORECASE) for pattern in numbered_patterns)
 
     def _by_fixed_size(self, text: str) -> list[Chapter]:
         cleaned = text.strip()

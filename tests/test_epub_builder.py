@@ -27,6 +27,26 @@ class EpubBuilderTest(unittest.TestCase):
                 chapter = archive.read("OEBPS/chapters/chapter001.xhtml").decode("utf-8")
                 self.assertIn("正文 &amp; &lt;内容&gt;", chapter)
 
+    def test_nav_groups_chapters_by_volume(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "volume.epub"
+            document = BookDocument(
+                title="分卷书",
+                chapters=[
+                    Chapter(1, "第一章", "正文", volume_title="第一卷"),
+                    Chapter(2, "第二章", "正文", volume_title="第一卷"),
+                    Chapter(3, "第三章", "正文", volume_title="第二卷"),
+                ],
+            )
+
+            EpubBuilder().build(document, output)
+
+            with zipfile.ZipFile(output, "r") as archive:
+                nav = archive.read("OEBPS/nav.xhtml").decode("utf-8")
+            self.assertIn("<span>第一卷</span>", nav)
+            self.assertIn("<span>第二卷</span>", nav)
+            self.assertIn("chapter003.xhtml", nav)
+
 
 if __name__ == "__main__":
     unittest.main()

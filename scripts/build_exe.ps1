@@ -9,10 +9,13 @@ Set-Location $ProjectRoot
 & py -3 -m pip install -r requirements.txt
 
 $args = @(
+    "--clean",
     "--name", "EpubForge",
     "--windowed",
     "--onefile",
     "--add-data", "app/assets/default.css;app/assets",
+    "--add-data", "app/assets/app.ico;app/assets",
+    "--add-data", "app/assets/app_icon.png;app/assets",
     "app/main.py"
 )
 
@@ -22,4 +25,3 @@ if (Test-Path $icon) {
 }
 
 & py -3 -m PyInstaller @args
-

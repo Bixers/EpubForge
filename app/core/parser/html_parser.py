@@ -6,6 +6,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from app.core.models import BookDocument, Chapter
+from app.core.chapter.rules import is_volume_title
 from app.core.parser.text_decoder import decode_text_file
 
 
@@ -24,6 +25,7 @@ class _HtmlChapterExtractor(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.title = ""
         self.chapters: list[Chapter] = []
+        self.current_volume = ""
         self.current_title = "正文"
         self.current_blocks: list[str] = []
         self.current_text: list[str] = []
@@ -62,6 +64,9 @@ class _HtmlChapterExtractor(HTMLParser):
             self.current_text = []
             return
         if tag in self.INLINE_TAGS:
+            if not self.current_tag:
+                self.current_tag = "p"
+                self.current_text = []
             self.inline_stack.append(self.INLINE_TAGS[tag])
             self.current_text.append(f"<{self.INLINE_TAGS[tag]}>")
             return
@@ -85,7 +90,15 @@ class _HtmlChapterExtractor(HTMLParser):
         if tag in self.HEADING_TAGS and self.current_tag == tag:
             heading = self._plain_current_text()
             if heading:
-                if self.current_blocks or self.chapters:
+                if tag == "h1" and is_volume_title(heading):
+                    if self.current_blocks or self.current_title != "正文":
+                        self._append_chapter()
+                    self.current_volume = heading
+                    self.current_title = "正文"
+                    self.current_tag = ""
+                    self.current_text = []
+                    return
+                if self.current_blocks or self.current_title != "正文":
                     self._append_chapter()
                 self.current_title = heading
             self.current_tag = ""
@@ -120,6 +133,9 @@ class _HtmlChapterExtractor(HTMLParser):
         if self.title_depth:
             self.title += data
             return
+        if not self.current_tag and data.strip():
+            self.current_tag = "p"
+            self.current_text = []
         if self.current_tag:
             self.current_text.append(escape(data))
 
@@ -145,7 +161,9 @@ class _HtmlChapterExtractor(HTMLParser):
 
     def _append_chapter(self) -> None:
         content = "\n".join(self.current_blocks) or "  <p></p>"
-        self.chapters.append(Chapter(len(self.chapters) + 1, self.current_title, content, "xhtml"))
+        self.chapters.append(
+            Chapter(len(self.chapters) + 1, self.current_title, content, "xhtml", self.current_volume)
+        )
         self.current_blocks = []
 
 

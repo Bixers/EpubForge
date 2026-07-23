@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import os
 import threading
+import traceback
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QSize, Qt, QThread, Signal, Slot
+from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -14,6 +16,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLineEdit,
+    QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -25,19 +28,25 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from qfluentwidgets import FluentIcon as FIF
+from qfluentwidgets import PrimaryPushButton, PushButton, Theme, setTheme, setThemeColor
 
 from app.core.batch.task_manager import TaskManager
+from app.error_report import write_error
 from app.core.format_detector import is_supported
 from app.core.models import AppConfig, ConvertTask
 from app.storage.config_service import ConfigService
 from app.ui.book_setting_panel import BookSettingPanel
 from app.ui.chapter_preview_panel import ChapterPreviewPanel
+from app.ui.icons import toolbar_icon
 from app.ui.log_panel import LogPanel
+from app.ui.style import APP_STYLESHEET
 from app.ui.task_table import TaskTable
 
 
 class ConversionWorker(QObject):
     task_updated = Signal(object)
+    failed = Signal(str)
     finished = Signal(object)
 
     def __init__(self, manager: TaskManager, tasks: list[ConvertTask]) -> None:
@@ -49,13 +58,17 @@ class ConversionWorker(QObject):
 
     @Slot()
     def run(self) -> None:
-        self.manager.run_tasks(
-            self.tasks,
-            on_update=lambda task: self.task_updated.emit(task),
-            stop_event=self.stop_event,
-            pause_event=self.pause_event,
-        )
-        self.finished.emit(self.tasks)
+        try:
+            self.manager.run_tasks(
+                self.tasks,
+                on_update=lambda task: self.task_updated.emit(task),
+                stop_event=self.stop_event,
+                pause_event=self.pause_event,
+            )
+        except BaseException:
+            self.failed.emit(traceback.format_exc())
+        finally:
+            self.finished.emit(self.tasks)
 
     def pause(self) -> None:
         self.pause_event.set()
@@ -71,7 +84,10 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("EpubForge 电子书工坊")
-        self.resize(1180, 720)
+        icon_path = Path(__file__).resolve().parents[1] / "assets" / "app.ico"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+        self.resize(1280, 760)
         self.setAcceptDrops(True)
 
         self.config_service = ConfigService()
@@ -80,25 +96,33 @@ class MainWindow(QMainWindow):
         self.tasks: list[ConvertTask] = []
         self.thread: QThread | None = None
         self.worker: ConversionWorker | None = None
+        self.summary_label = QLabel("任务 0 | 等待 0 | 完成 0 | 失败 0")
 
         self.task_table = TaskTable()
         self.setting_panel = BookSettingPanel()
         self.preview_panel = ChapterPreviewPanel()
         self.log_panel = LogPanel()
         self.setting_panel.apply_requested.connect(self.apply_book_settings)
+        self.preview_panel.chapters_changed.connect(self.on_chapters_changed)
         self.task_table.itemSelectionChanged.connect(self.refresh_side_panel)
+        self.task_table.import_files_requested.connect(self.import_files)
+        self.task_table.import_folder_requested.connect(self.import_folder)
 
         tabs = QTabWidget()
         tabs.addTab(self.setting_panel, "书籍设置")
-        tabs.addTab(self.preview_panel, "章节预览")
+        tabs.addTab(self.preview_panel, "章节编辑")
         tabs.addTab(self.log_panel, "日志详情")
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.task_table)
         splitter.addWidget(tabs)
-        splitter.setSizes([700, 420])
+        splitter.setSizes([820, 460])
+        splitter.setChildrenCollapsible(False)
         self.setCentralWidget(splitter)
         self._create_toolbar()
+        self.statusBar().addPermanentWidget(self.summary_label)
+        self.statusBar().showMessage("就绪")
+        self.update_summary()
 
     def _create_toolbar(self) -> None:
         toolbar = QToolBar("主工具栏")
@@ -106,21 +130,25 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
         actions = [
-            ("导入文件", self.import_files),
-            ("导入文件夹", self.import_folder),
-            ("开始转换", self.start_conversion),
-            ("暂停", self.pause_conversion),
-            ("继续", self.resume_conversion),
-            ("停止", self.stop_conversion),
-            ("重试失败", self.retry_failed_tasks),
-            ("设置", self.open_settings),
-            ("输出目录", self.open_output_dir),
-            ("删除任务", self.remove_selected_task),
-            ("清空任务", self.clear_tasks),
+            ("导入", self.import_files, FIF.DOCUMENT, False),
+            ("导入文件夹", self.import_folder, FIF.FOLDER_ADD, False),
+            ("开始转换", self.start_conversion, FIF.PLAY, True),
+            ("暂停", self.pause_conversion, FIF.PAUSE, False),
+            ("继续", self.resume_conversion, FIF.PLAY, False),
+            ("停止", self.stop_conversion, toolbar_icon("stop"), False),
+            ("重试失败", self.retry_failed_tasks, FIF.SYNC, False),
+            ("输出目录", self.open_output_dir, FIF.FOLDER, False),
+            ("设置", self.open_settings, FIF.SETTING, False),
+            ("清理任务", self.clear_tasks, FIF.DELETE, False),
         ]
-        for text, slot in actions:
-            action = toolbar.addAction(text)
-            action.triggered.connect(slot)
+        for text, slot, icon_key, is_primary in actions:
+            button = PrimaryPushButton() if is_primary else PushButton()
+            button.setText(text)
+            button.setIcon(icon_key)
+            button.setIconSize(QSize(18, 18))
+            button.setFixedHeight(38)
+            button.clicked.connect(slot)
+            toolbar.addWidget(button)
 
     def import_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
@@ -148,6 +176,7 @@ class MainWindow(QMainWindow):
                 continue
             self.tasks.append(task)
             self.task_table.add_task(task)
+        self.update_summary()
         if errors:
             QMessageBox.warning(self, "部分文件未导入", "\n".join(errors[:10]))
         if self.tasks and self.task_table.selected_row() < 0:
@@ -156,6 +185,7 @@ class MainWindow(QMainWindow):
     def start_conversion(self) -> None:
         if self.worker is not None:
             return
+        self.preview_panel.save_current_chapter()
         pending = [task for task in self.tasks if task.status in {"等待中", "失败", "已取消"}]
         if not pending:
             QMessageBox.information(self, "没有待转换任务", "请先导入文件，或确认任务不是已完成状态。")
@@ -165,6 +195,7 @@ class MainWindow(QMainWindow):
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.worker.task_updated.connect(self.on_task_updated)
+        self.worker.failed.connect(self.on_worker_failed)
         self.worker.finished.connect(self.on_worker_finished)
         self.worker.finished.connect(self.thread.quit)
         self.worker.finished.connect(self.worker.deleteLater)
@@ -208,6 +239,7 @@ class MainWindow(QMainWindow):
         task_id = self.task_table.task_id_at(row)
         self.tasks = [task for task in self.tasks if task.id != task_id]
         self.task_table.removeRow(row)
+        self.update_summary()
         self.refresh_side_panel()
 
     def clear_tasks(self) -> None:
@@ -216,6 +248,7 @@ class MainWindow(QMainWindow):
             return
         self.tasks.clear()
         self.task_table.setRowCount(0)
+        self.update_summary()
         self.refresh_side_panel()
 
     def open_output_dir(self) -> None:
@@ -240,6 +273,7 @@ class MainWindow(QMainWindow):
                     self.tasks[index] = updated
                     break
             self.task_table.update_task(row, updated)
+        self.update_summary()
         self.refresh_side_panel(refresh_preview=False)
 
     @Slot(object)
@@ -253,6 +287,16 @@ class MainWindow(QMainWindow):
             self,
             "转换完成",
             f"本次任务完成 {completed} 个，失败 {failed} 个，取消 {cancelled} 个。",
+        )
+        self.update_summary()
+
+    @Slot(str)
+    def on_worker_failed(self, error_text: str) -> None:
+        path = write_error(error_text)
+        QMessageBox.critical(
+            self,
+            "转换异常",
+            f"转换线程发生异常，已写入日志：\n{path}\n\n请保留该日志用于排查。",
         )
 
     def refresh_side_panel(self, refresh_preview: bool = True) -> None:
@@ -273,7 +317,26 @@ class MainWindow(QMainWindow):
         row = self.task_table.selected_row()
         if row >= 0:
             self.task_table.update_task(row, task)
+        self.update_summary()
         self.refresh_side_panel()
+
+    def on_chapters_changed(self, task: ConvertTask) -> None:
+        self.manager.repository.save_task(task)
+        row = self._row_for_task(task.id)
+        if row >= 0:
+            self.task_table.update_task(row, task)
+        self.update_summary()
+        self.log_panel.set_log(task.logs)
+
+    def update_summary(self) -> None:
+        total = len(self.tasks)
+        waiting = sum(1 for task in self.tasks if task.status == "等待中")
+        completed = sum(1 for task in self.tasks if task.status == "完成")
+        failed = sum(1 for task in self.tasks if task.status == "失败")
+        edited = sum(1 for task in self.tasks if task.has_edited_chapters)
+        self.summary_label.setText(
+            f"任务 {total} | 等待 {waiting} | 完成 {completed} | 失败 {failed} | 已编辑 {edited}"
+        )
 
     def current_task(self) -> ConvertTask | None:
         row = self.task_table.selected_row()
@@ -322,7 +385,9 @@ class SettingsDialog(QDialog):
         self.chapter_rule_combo = QComboBox()
         self.chapter_rule_combo.addItems(["default", "custom", "fixed_size", "blank_lines", "none"])
         self.chapter_rule_combo.setCurrentText(config.chapter_rule)
-        self.custom_regex_edit = QLineEdit(config.custom_chapter_regex)
+        self.custom_regex_edit = QTextEdit()
+        self.custom_regex_edit.setPlainText(config.custom_chapter_regex)
+        self.custom_regex_edit.setFixedHeight(82)
         self.fixed_chars_spin = QSpinBox()
         self.fixed_chars_spin.setRange(1000, 100000)
         self.fixed_chars_spin.setSingleStep(500)
@@ -377,7 +442,7 @@ class SettingsDialog(QDialog):
             default_language=self.language_edit.text().strip() or "zh-CN",
             default_author=self.author_edit.text().strip(),
             chapter_rule=self.chapter_rule_combo.currentText(),
-            custom_chapter_regex=self.custom_regex_edit.text().strip(),
+            custom_chapter_regex=self.custom_regex_edit.toPlainText().strip(),
             fixed_chapter_chars=self.fixed_chars_spin.value(),
             calibre_path=self.calibre_edit.text().strip(),
             default_css=self.default_css_edit.toPlainText(),
@@ -386,6 +451,10 @@ class SettingsDialog(QDialog):
 
 def run_app() -> int:
     app = QApplication([])
+    app.setFont(QFont("Microsoft YaHei UI", 9))
+    setTheme(Theme.LIGHT)
+    setThemeColor("#1463ff")
+    app.setStyleSheet(APP_STYLESHEET)
     window = MainWindow()
     window.show()
     return app.exec()

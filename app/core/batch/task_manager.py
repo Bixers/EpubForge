@@ -152,6 +152,9 @@ class TaskManager:
             cover_path=task.cover_path,
         )
         task.log(f"识别编码：{document.metadata.get('source_encoding', 'unknown')}")
+        if task.has_edited_chapters:
+            document.chapters = task.edited_chapters
+            task.log("使用已编辑章节内容")
         task.log(f"识别章节数：{len(document.chapters)}")
         self._set_status(task, "清洗中", 35, on_update)
         self._wait_if_paused(pause_event, stop_event)

@@ -17,6 +17,7 @@ class Chapter:
     title: str
     content: str
     content_format: str = "text"
+    volume_title: str = ""
 
 
 @dataclass(slots=True)
@@ -69,6 +70,7 @@ class ConvertTask:
     started_at: str = ""
     finished_at: str = ""
     logs: list[str] = field(default_factory=list)
+    edited_chapters: list[Chapter] = field(default_factory=list)
 
     def log(self, message: str) -> None:
         self.logs.append(f"[{now_text()}] {message}")
@@ -76,3 +78,7 @@ class ConvertTask:
     @property
     def display_title(self) -> str:
         return self.title.strip() or self.source_path.stem
+
+    @property
+    def has_edited_chapters(self) -> bool:
+        return bool(self.edited_chapters)

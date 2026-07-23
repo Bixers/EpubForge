@@ -42,6 +42,27 @@ class MarkupParserTest(unittest.TestCase):
             self.assertIn("<strong>加粗</strong>", document.chapters[0].content)
             self.assertNotIn("alert", document.chapters[0].content)
 
+    def test_html_parser_keeps_loose_text_and_consecutive_headings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "loose.html"
+            source.write_text("开头游离文本<h1>第一章</h1><h1>第二章</h1>正文", encoding="utf-8")
+
+            document = HtmlParser().parse(source)
+
+            self.assertEqual([chapter.title for chapter in document.chapters], ["正文", "第一章", "第二章"])
+            self.assertIn("开头游离文本", document.chapters[0].content)
+            self.assertIn("正文", document.chapters[2].content)
+
+    def test_markdown_parser_preserves_consecutive_headings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "empty.md"
+            source.write_text("# 第一章\n# 第二章\n正文", encoding="utf-8")
+
+            document = MarkdownParser().parse(source)
+
+            self.assertEqual([chapter.title for chapter in document.chapters], ["第一章", "第二章"])
+            self.assertEqual(document.chapters[0].content, "  <p></p>")
+
     def test_markup_epub_contains_clean_xhtml(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
