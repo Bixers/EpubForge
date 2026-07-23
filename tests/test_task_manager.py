@@ -68,6 +68,24 @@ class TaskManagerTest(unittest.TestCase):
 
             self.assertEqual(row, ("自定义书名", "作者"))
 
+    def test_lists_recent_tasks_from_repository(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repository = TaskRepository(root / "tasks.sqlite3")
+            manager = TaskManager(AppConfig(output_dir=str(root / "output")), repository)
+            source = root / "demo.txt"
+            source.write_text("正文", encoding="utf-8")
+            task = manager.create_task(source)
+            task.title = "历史书名"
+            task.file_size = 123
+            repository.save_task(task)
+
+            recent = repository.list_recent_tasks()
+
+            self.assertEqual(len(recent), 1)
+            self.assertEqual(recent[0].title, "历史书名")
+            self.assertEqual(recent[0].file_size, 123)
+
     def test_cli_converts_txt_without_gui_dependency(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -117,6 +135,28 @@ class TaskManagerTest(unittest.TestCase):
                 chapter = archive.read("OEBPS/chapters/chapter001.xhtml").decode("utf-8")
             self.assertIn("改后章节", chapter)
             self.assertIn("编辑后的内容", chapter)
+
+    def test_conversion_logs_preflight_warnings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "demo.txt"
+            source.write_text("正文", encoding="utf-8")
+            manager = TaskManager(
+                AppConfig(output_dir=str(root / "out")),
+                TaskRepository(root / "tasks.sqlite3"),
+            )
+            task = manager.create_task(source)
+            task.edited_chapters = [
+                Chapter(1, "重复", ""),
+                Chapter(2, "重复", "短"),
+            ]
+
+            manager.convert_task(task)
+
+            log_text = "\n".join(task.logs)
+            self.assertIn("转换前检查：重复 内容为空", log_text)
+            self.assertIn("转换前检查：重复章节标题：重复", log_text)
+            self.assertIn("转换前检查：重复 内容过短", log_text)
 
 
 if __name__ == "__main__":

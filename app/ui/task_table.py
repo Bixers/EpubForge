@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QHeaderView, QLabel, QTableWidget, QTableWidgetItem, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QHeaderView, QLabel, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import IconWidget, PrimaryPushButton, PushButton, TableWidget
 
@@ -24,6 +24,8 @@ class TaskTable(TableWidget):
         self.setAlternatingRowColors(True)
         self.setShowGrid(False)
         self.verticalHeader().setVisible(False)
+        self.verticalHeader().setDefaultSectionSize(42)
+        self.verticalHeader().setMinimumSectionSize(40)
         self.setHorizontalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
         header = self.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
@@ -34,21 +36,24 @@ class TaskTable(TableWidget):
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
-        self.setColumnWidth(0, 34)
+        self.setColumnWidth(0, 40)
         self.empty_panel = self._create_empty_panel()
         self.refresh_empty_state()
 
     def _create_empty_panel(self) -> QFrame:
         panel = QFrame(self.viewport())
         panel.setObjectName("emptyDropPanel")
-        panel.setFixedSize(520, 230)
+        panel.setFixedSize(560, 230)
 
         icon = IconWidget(FIF.FOLDER)
         icon.setFixedSize(54, 54)
 
-        title = QLabel("拖入 TXT/EPUB 文件或选择文件夹")
+        title = QLabel("拖入 TXT / EPUB 文件开始制作电子书")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setObjectName("emptyDropTitle")
+        subtitle = QLabel("支持批量导入，可在右侧统一设置书籍信息")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setObjectName("emptyDropSubtitle")
 
         file_button = PrimaryPushButton()
         file_button.setText("选择文件")
@@ -73,6 +78,7 @@ class TaskTable(TableWidget):
         layout.addStretch(1)
         layout.addWidget(icon, 0, Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
+        layout.addWidget(subtitle)
         layout.addLayout(buttons)
         layout.addStretch(1)
         return panel
@@ -108,6 +114,7 @@ class TaskTable(TableWidget):
             item.setText(value)
             item.setToolTip(value)
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
             if column == 0:
                 item.setCheckState(Qt.CheckState.Checked)
                 item.setFlags(
@@ -116,13 +123,42 @@ class TaskTable(TableWidget):
                     | Qt.ItemFlag.ItemIsSelectable
                 )
             if column == 4:
-                self._style_status_item(item, task.status)
+                item.setText("")
+                self._set_status_badge(row, task.status)
+            elif column in {2, 3, 5}:
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.refresh_empty_state()
+
+    def _set_status_badge(self, row: int, status: str) -> None:
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge = QLabel(status)
+        badge.setObjectName("statusBadge")
+        badge.setProperty("status", self._status_kind(status))
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setFixedHeight(22)
+        badge.setMinimumWidth(54)
+        layout.addWidget(badge)
+        self.setCellWidget(row, 4, container)
+
+    def _status_kind(self, status: str) -> str:
+        if status == "完成":
+            return "success"
+        if status == "失败":
+            return "error"
+        if status == "已取消":
+            return "muted"
+        if status == "等待中":
+            return "waiting"
+        return "running"
 
     def refresh_empty_state(self) -> None:
         if not hasattr(self, "empty_panel"):
             return
         self.empty_panel.setVisible(self.rowCount() == 0)
+        self.setProperty("emptyState", self.rowCount() == 0)
         self._position_empty_panel()
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override
@@ -132,7 +168,7 @@ class TaskTable(TableWidget):
     def _position_empty_panel(self) -> None:
         viewport = self.viewport()
         x = max(24, (viewport.width() - self.empty_panel.width()) // 2)
-        y = max(120, (viewport.height() - self.empty_panel.height()) // 2)
+        y = max(88, (viewport.height() - self.empty_panel.height()) // 2 - 48)
         self.empty_panel.move(x, y)
 
     def _style_status_item(self, item: QTableWidgetItem, status: str) -> None:
@@ -150,6 +186,7 @@ class TaskTable(TableWidget):
         background, foreground = colors.get(status, (QColor("#ffffff"), QColor("#111827")))
         item.setBackground(background)
         item.setForeground(foreground)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
     def selected_row(self) -> int:
         selected = self.selectionModel().selectedRows()
@@ -158,6 +195,16 @@ class TaskTable(TableWidget):
     def task_id_at(self, row: int) -> str:
         item = self.verticalHeaderItem(row)
         return item.text() if item else ""
+
+    def checked_task_ids(self) -> set[str]:
+        checked: set[str] = set()
+        for row in range(self.rowCount()):
+            item = self.item(row, 0)
+            if item is not None and item.checkState() == Qt.CheckState.Checked:
+                task_id = self.task_id_at(row)
+                if task_id:
+                    checked.add(task_id)
+        return checked
 
     def _format_size(self, size: int) -> str:
         if size < 1024:

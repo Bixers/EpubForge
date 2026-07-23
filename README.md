@@ -46,4 +46,12 @@ py -3 -m unittest discover tests
 .\scripts\build_exe.ps1
 ```
 
-打包输出位于 `dist/EpubForge.exe`。如需安装包，可用 Inno Setup 打开 `scripts/build_installer.iss` 生成 `EpubForge_Setup_1.0.0.exe`。
+默认输出为启动更快的目录版：`dist/EpubForge/EpubForge.exe`。目录版不会在每次启动时解压 PySide6 运行库，适合作为日常使用版本。
+
+如确实需要单文件版本，可执行：
+
+```powershell
+.\scripts\build_exe.ps1 -OneFile
+```
+
+单文件输出位于 `dist/EpubForge.exe`，但启动时需要先解压运行库，打开速度会明显慢于目录版。如需安装包，可用 Inno Setup 打开 `scripts/build_installer.iss` 生成 `EpubForge_Setup_1.0.0.exe`。

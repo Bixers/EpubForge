@@ -14,12 +14,15 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLineEdit,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QSplitter,
     QTabWidget,
@@ -27,11 +30,14 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
-from qfluentwidgets import FluentIcon as FIF
-from qfluentwidgets import PrimaryPushButton, PushButton, Theme, setTheme, setThemeColor
+from qfluentwidgets import CheckBox, ComboBox as FluentComboBox, FluentIcon as FIF
+from qfluentwidgets import LineEdit as FluentLineEdit
+from qfluentwidgets import PrimaryPushButton, PushButton, SpinBox, TextEdit as FluentTextEdit, Theme, setTheme, setThemeColor
 
 from app.core.batch.task_manager import TaskManager
+from app.core.presets import CSS_TEMPLATES, CONVERSION_PRESETS, css_template_names, conversion_preset_names
 from app.error_report import write_error
 from app.core.format_detector import is_supported
 from app.core.models import AppConfig, ConvertTask
@@ -40,8 +46,12 @@ from app.ui.book_setting_panel import BookSettingPanel
 from app.ui.chapter_preview_panel import ChapterPreviewPanel
 from app.ui.icons import toolbar_icon
 from app.ui.log_panel import LogPanel
-from app.ui.style import APP_STYLESHEET
+from app.ui.style import APP_STYLESHEET, apply_light_palette
 from app.ui.task_table import TaskTable
+
+
+def app_icon_path() -> Path:
+    return Path(__file__).resolve().parents[1] / "assets" / "app.ico"
 
 
 class ConversionWorker(QObject):
@@ -84,7 +94,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("EpubForge 电子书工坊")
-        icon_path = Path(__file__).resolve().parents[1] / "assets" / "app.ico"
+        icon_path = app_icon_path()
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
         self.resize(1280, 760)
@@ -96,7 +106,10 @@ class MainWindow(QMainWindow):
         self.tasks: list[ConvertTask] = []
         self.thread: QThread | None = None
         self.worker: ConversionWorker | None = None
+        self.conversion_paused = False
+        self.toolbar_buttons: dict[str, PushButton] = {}
         self.summary_label = QLabel("任务 0 | 等待 0 | 完成 0 | 失败 0")
+        self.summary_label.setObjectName("summaryLabel")
 
         self.task_table = TaskTable()
         self.setting_panel = BookSettingPanel()
@@ -109,46 +122,84 @@ class MainWindow(QMainWindow):
         self.task_table.import_folder_requested.connect(self.import_folder)
 
         tabs = QTabWidget()
-        tabs.addTab(self.setting_panel, "书籍设置")
-        tabs.addTab(self.preview_panel, "章节编辑")
-        tabs.addTab(self.log_panel, "日志详情")
+        tabs.setMinimumWidth(320)
+        tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        tabs.addTab(self._scrollable_panel(self.setting_panel), "书籍设置")
+        tabs.addTab(self._scrollable_panel(self.preview_panel), "章节编辑")
+        tabs.addTab(self._scrollable_panel(self.log_panel), "日志详情")
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(8)
         splitter.addWidget(self.task_table)
         splitter.addWidget(tabs)
-        splitter.setSizes([820, 460])
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        splitter.setSizes([760, 520])
         splitter.setChildrenCollapsible(False)
         self.setCentralWidget(splitter)
         self._create_toolbar()
+        self.statusBar().setFixedHeight(32)
         self.statusBar().addPermanentWidget(self.summary_label)
         self.statusBar().showMessage("就绪")
         self.update_summary()
+
+    def _scrollable_panel(self, panel: QWidget) -> QScrollArea:
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(panel)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setMinimumWidth(0)
+        scroll_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        return scroll_area
 
     def _create_toolbar(self) -> None:
         toolbar = QToolBar("主工具栏")
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
-        actions = [
-            ("导入", self.import_files, FIF.DOCUMENT, False),
-            ("导入文件夹", self.import_folder, FIF.FOLDER_ADD, False),
-            ("开始转换", self.start_conversion, FIF.PLAY, True),
-            ("暂停", self.pause_conversion, FIF.PAUSE, False),
-            ("继续", self.resume_conversion, FIF.PLAY, False),
-            ("停止", self.stop_conversion, toolbar_icon("stop"), False),
-            ("重试失败", self.retry_failed_tasks, FIF.SYNC, False),
-            ("输出目录", self.open_output_dir, FIF.FOLDER, False),
-            ("设置", self.open_settings, FIF.SETTING, False),
-            ("清理任务", self.clear_tasks, FIF.DELETE, False),
+        groups = [
+            [
+                ("import", "导入", self.import_files, FIF.DOCUMENT, False),
+                ("import_folder", "导入文件夹", self.import_folder, FIF.FOLDER_ADD, False),
+            ],
+            [
+                ("start", "开始转换", self.start_conversion, FIF.PLAY, True),
+                ("pause", "暂停", self.pause_conversion, FIF.PAUSE, False),
+                ("resume", "继续", self.resume_conversion, FIF.PLAY, False),
+                ("stop", "停止", self.stop_conversion, toolbar_icon("stop"), False),
+            ],
+            [
+                ("retry", "重试失败", self.retry_failed_tasks, FIF.SYNC, False),
+                ("output", "输出目录", self.open_output_dir, FIF.FOLDER, False),
+            ],
+            [
+                ("settings", "设置", self.open_settings, FIF.SETTING, False),
+                ("history", "历史任务", self.load_recent_tasks, FIF.HISTORY, False),
+                ("clear", "清理任务", self.clear_tasks, FIF.DELETE, False),
+            ],
         ]
-        for text, slot, icon_key, is_primary in actions:
-            button = PrimaryPushButton() if is_primary else PushButton()
-            button.setText(text)
-            button.setIcon(icon_key)
-            button.setIconSize(QSize(18, 18))
-            button.setFixedHeight(38)
-            button.clicked.connect(slot)
-            toolbar.addWidget(button)
+        for group_index, group in enumerate(groups):
+            if group_index:
+                self._add_toolbar_gap(toolbar)
+            for key, text, slot, icon_key, is_primary in group:
+                button = PrimaryPushButton() if is_primary else PushButton()
+                button.setText(text)
+                button.setIcon(icon_key)
+                button.setIconSize(QSize(18, 18))
+                button.setFixedHeight(38)
+                button.clicked.connect(slot)
+                toolbar.addWidget(button)
+                self.toolbar_buttons[key] = button
+        self.update_toolbar_state()
+
+    def _add_toolbar_gap(self, toolbar: QToolBar) -> None:
+        spacer = QWidget(toolbar)
+        spacer.setFixedWidth(14)
+        action = QWidgetAction(toolbar)
+        action.setDefaultWidget(spacer)
+        toolbar.addAction(action)
 
     def import_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
@@ -201,14 +252,20 @@ class MainWindow(QMainWindow):
         self.worker.finished.connect(self.worker.deleteLater)
         self.thread.finished.connect(self.thread.deleteLater)
         self.thread.start()
+        self.conversion_paused = False
+        self.update_toolbar_state()
 
     def pause_conversion(self) -> None:
         if self.worker:
             self.worker.pause()
+            self.conversion_paused = True
+            self.update_toolbar_state()
 
     def resume_conversion(self) -> None:
         if self.worker:
             self.worker.resume()
+            self.conversion_paused = False
+            self.update_toolbar_state()
 
     def stop_conversion(self) -> None:
         if self.worker:
@@ -280,6 +337,7 @@ class MainWindow(QMainWindow):
     def on_worker_finished(self, finished_tasks: list[ConvertTask]) -> None:
         self.worker = None
         self.thread = None
+        self.conversion_paused = False
         completed = sum(1 for task in finished_tasks if task.status == "完成")
         failed = sum(1 for task in finished_tasks if task.status == "失败")
         cancelled = sum(1 for task in finished_tasks if task.status == "已取消")
@@ -307,16 +365,22 @@ class MainWindow(QMainWindow):
         self.log_panel.set_log(task.logs if task else [])
 
     def apply_book_settings(self, values: dict) -> None:
-        task = self.current_task()
-        if task is None:
+        target_ids = self.task_table.checked_task_ids()
+        if target_ids:
+            targets = [task for task in self.tasks if task.id in target_ids]
+        else:
+            task = self.current_task()
+            targets = [task] if task is not None else []
+        if not targets:
             return
-        for key, value in values.items():
-            setattr(task, key, value)
-        task.log("已更新书籍元数据")
-        self.manager.repository.save_task(task)
-        row = self.task_table.selected_row()
-        if row >= 0:
-            self.task_table.update_task(row, task)
+        for task in targets:
+            for key, value in values.items():
+                setattr(task, key, value)
+            task.log("已更新书籍元数据")
+            self.manager.repository.save_task(task)
+            row = self._row_for_task(task.id)
+            if row >= 0:
+                self.task_table.update_task(row, task)
         self.update_summary()
         self.refresh_side_panel()
 
@@ -337,6 +401,49 @@ class MainWindow(QMainWindow):
         self.summary_label.setText(
             f"任务 {total} | 等待 {waiting} | 完成 {completed} | 失败 {failed} | 已编辑 {edited}"
         )
+        self.update_toolbar_state()
+
+    def update_toolbar_state(self) -> None:
+        if not self.toolbar_buttons:
+            return
+        has_tasks = bool(self.tasks)
+        is_running = self.worker is not None
+        has_failed = any(task.status == "失败" for task in self.tasks)
+        has_pending = any(task.status in {"等待中", "失败", "已取消"} for task in self.tasks)
+
+        states = {
+            "import": True,
+            "import_folder": True,
+            "output": True,
+            "settings": True,
+            "history": True,
+            "start": has_pending and not is_running,
+            "pause": is_running and not self.conversion_paused,
+            "resume": is_running and self.conversion_paused,
+            "stop": is_running,
+            "retry": has_failed and not is_running,
+            "clear": has_tasks and not is_running,
+        }
+        for key, enabled in states.items():
+            self.toolbar_buttons[key].setEnabled(enabled)
+
+    def load_recent_tasks(self, checked: bool = False, show_empty: bool = True) -> None:
+        existing_ids = {task.id for task in self.tasks}
+        added = 0
+        for task in self.manager.repository.list_recent_tasks(50):
+            if task.id in existing_ids:
+                continue
+            if not task.source_path.exists():
+                task.error_message = "源文件不存在"
+            self.tasks.append(task)
+            self.task_table.add_task(task)
+            existing_ids.add(task.id)
+            added += 1
+        self.update_summary()
+        if self.tasks and self.task_table.selected_row() < 0:
+            self.task_table.selectRow(0)
+        if added == 0 and show_empty:
+            QMessageBox.information(self, "没有历史任务", "当前没有可恢复的历史任务。")
 
     def current_task(self) -> ConvertTask | None:
         row = self.task_table.selected_row()
@@ -371,32 +478,49 @@ class SettingsDialog(QDialog):
     def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("设置")
-        self.output_dir_edit = QLineEdit(config.output_dir)
-        self.overwrite_check = QCheckBox()
+        self.setObjectName("settingsDialog")
+        self.output_dir_edit = FluentLineEdit()
+        self.output_dir_edit.setText(config.output_dir)
+        self.overwrite_check = CheckBox()
         self.overwrite_check.setChecked(config.overwrite_existing)
-        self.keep_structure_check = QCheckBox()
+        self.keep_structure_check = CheckBox()
         self.keep_structure_check.setChecked(config.keep_folder_structure)
-        self.language_edit = QLineEdit(config.default_language)
-        self.author_edit = QLineEdit(config.default_author)
-        self.concurrency_spin = QSpinBox()
+        self.language_edit = FluentLineEdit()
+        self.language_edit.setText(config.default_language)
+        self.author_edit = FluentLineEdit()
+        self.author_edit.setText(config.default_author)
+        self.concurrency_spin = SpinBox()
         self.concurrency_spin.setRange(1, 16)
         self.concurrency_spin.setValue(config.max_concurrency)
-        self.calibre_edit = QLineEdit(config.calibre_path)
-        self.chapter_rule_combo = QComboBox()
+        self.calibre_edit = FluentLineEdit()
+        self.calibre_edit.setText(config.calibre_path)
+        self.epubcheck_edit = FluentLineEdit()
+        self.epubcheck_edit.setText(config.epubcheck_path)
+        self.preset_combo = FluentComboBox()
+        self.preset_combo.addItems(conversion_preset_names())
+        self.preset_combo.setCurrentText(config.conversion_preset)
+        self.preset_combo.currentTextChanged.connect(self.apply_conversion_preset)
+        self.chapter_rule_combo = FluentComboBox()
         self.chapter_rule_combo.addItems(["default", "custom", "fixed_size", "blank_lines", "none"])
         self.chapter_rule_combo.setCurrentText(config.chapter_rule)
-        self.custom_regex_edit = QTextEdit()
+        self.custom_regex_edit = FluentTextEdit()
         self.custom_regex_edit.setPlainText(config.custom_chapter_regex)
         self.custom_regex_edit.setFixedHeight(82)
-        self.fixed_chars_spin = QSpinBox()
+        self.fixed_chars_spin = SpinBox()
         self.fixed_chars_spin.setRange(1000, 100000)
         self.fixed_chars_spin.setSingleStep(500)
         self.fixed_chars_spin.setValue(config.fixed_chapter_chars)
-        self.default_css_edit = QTextEdit()
+        self.css_template_combo = FluentComboBox()
+        self.css_template_combo.addItems(css_template_names())
+        self.css_template_combo.setCurrentText(config.css_template)
+        self.css_template_combo.currentTextChanged.connect(self.apply_css_template)
+        self.default_css_edit = FluentTextEdit()
         self.default_css_edit.setPlainText(config.default_css)
         self.default_css_edit.setFixedHeight(120)
 
-        browse_output = QPushButton("选择")
+        browse_output = PushButton()
+        browse_output.setText("选择")
+        browse_output.setIcon(FIF.FOLDER)
         browse_output.clicked.connect(self.choose_output_dir)
         output_row = QHBoxLayout()
         output_row.addWidget(self.output_dir_edit)
@@ -410,13 +534,19 @@ class SettingsDialog(QDialog):
         form.addRow("默认作者", self.author_edit)
         form.addRow("最大并发任务数", self.concurrency_spin)
         form.addRow("Calibre 路径", self.calibre_edit)
+        form.addRow("EPUBCheck 路径", self.epubcheck_edit)
+        form.addRow("转换预设", self.preset_combo)
         form.addRow("章节规则", self.chapter_rule_combo)
         form.addRow("自定义章节正则", self.custom_regex_edit)
         form.addRow("固定字数分章", self.fixed_chars_spin)
+        form.addRow("CSS 模板", self.css_template_combo)
         form.addRow("默认 CSS 样式", self.default_css_edit)
 
-        ok_button = QPushButton("保存")
-        cancel_button = QPushButton("取消")
+        ok_button = PrimaryPushButton()
+        ok_button.setText("保存")
+        ok_button.setIcon(FIF.SAVE)
+        cancel_button = PushButton()
+        cancel_button.setText("取消")
         ok_button.clicked.connect(self.accept)
         cancel_button.clicked.connect(self.reject)
         buttons = QHBoxLayout()
@@ -427,6 +557,21 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addLayout(buttons)
+
+    def apply_conversion_preset(self, name: str) -> None:
+        preset = CONVERSION_PRESETS.get(name)
+        if preset is None:
+            return
+        self.chapter_rule_combo.setCurrentText(preset.chapter_rule)
+        self.custom_regex_edit.setPlainText(preset.custom_chapter_regex)
+        self.fixed_chars_spin.setValue(preset.fixed_chapter_chars)
+        self.css_template_combo.setCurrentText(preset.css_template)
+        self.apply_css_template(preset.css_template)
+
+    def apply_css_template(self, name: str) -> None:
+        template = CSS_TEMPLATES.get(name)
+        if template is not None:
+            self.default_css_edit.setPlainText(template.css)
 
     def choose_output_dir(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "选择输出目录", self.output_dir_edit.text())
@@ -445,15 +590,25 @@ class SettingsDialog(QDialog):
             custom_chapter_regex=self.custom_regex_edit.toPlainText().strip(),
             fixed_chapter_chars=self.fixed_chars_spin.value(),
             calibre_path=self.calibre_edit.text().strip(),
+            epubcheck_path=self.epubcheck_edit.text().strip(),
+            conversion_preset=self.preset_combo.currentText(),
+            css_template=self.css_template_combo.currentText(),
             default_css=self.default_css_edit.toPlainText(),
         )
 
 
 def run_app() -> int:
     app = QApplication([])
+    app.setApplicationName("EpubForge")
+    app.setApplicationDisplayName("EpubForge 电子书工坊")
+    app.setOrganizationName("Bixers")
     app.setFont(QFont("Microsoft YaHei UI", 9))
+    icon_path = app_icon_path()
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
     setTheme(Theme.LIGHT)
     setThemeColor("#1463ff")
+    apply_light_palette(app)
     app.setStyleSheet(APP_STYLESHEET)
     window = MainWindow()
     window.show()

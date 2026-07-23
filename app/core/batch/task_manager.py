@@ -112,7 +112,7 @@ class TaskManager:
                 return
 
             self._set_status(task, "校验中", 92, on_update)
-            ok, errors = self.validator.validate(task.output_path)
+            ok, errors = self.validator.validate(task.output_path, self.config.epubcheck_path)
             if not ok:
                 raise ValueError("；".join(errors))
             task.status = "完成"
@@ -156,6 +156,8 @@ class TaskManager:
             document.chapters = task.edited_chapters
             task.log("使用已编辑章节内容")
         task.log(f"识别章节数：{len(document.chapters)}")
+        for warning in self._inspect_document(document.chapters):
+            task.log(f"转换前检查：{warning}")
         self._set_status(task, "清洗中", 35, on_update)
         self._wait_if_paused(pause_event, stop_event)
         self._set_status(task, "生成目录中", 55, on_update)
@@ -175,6 +177,27 @@ class TaskManager:
         if source_format == "html":
             return HtmlParser()
         raise ValueError(f"不支持的文件格式：{source_format}")
+
+    def _inspect_document(self, chapters) -> list[str]:
+        warnings: list[str] = []
+        if not chapters:
+            return ["未识别到章节"]
+        seen_titles: dict[str, int] = {}
+        for chapter in chapters:
+            title = chapter.title.strip()
+            if not title:
+                warnings.append(f"第 {chapter.index} 章缺少标题")
+            elif title in seen_titles:
+                warnings.append(f"重复章节标题：{title}")
+            seen_titles[title] = seen_titles.get(title, 0) + 1
+            text_length = len(chapter.content.strip())
+            if text_length == 0:
+                warnings.append(f"{title or f'第 {chapter.index} 章'} 内容为空")
+            elif text_length < 20:
+                warnings.append(f"{title or f'第 {chapter.index} 章'} 内容过短：{text_length} 字")
+            elif text_length > 30000:
+                warnings.append(f"{title or f'第 {chapter.index} 章'} 内容过长：{text_length} 字，建议拆分")
+        return warnings
 
     def _convert_with_calibre(
         self,

@@ -46,6 +46,9 @@ class AppConfig:
     custom_chapter_regex: str = ""
     fixed_chapter_chars: int = 6000
     calibre_path: str = ""
+    epubcheck_path: str = ""
+    conversion_preset: str = "网文 TXT"
+    css_template: str = "默认阅读"
     default_css: str = ""
 
 

@@ -27,6 +27,20 @@ class EpubBuilderTest(unittest.TestCase):
                 chapter = archive.read("OEBPS/chapters/chapter001.xhtml").decode("utf-8")
                 self.assertIn("正文 &amp; &lt;内容&gt;", chapter)
 
+    def test_validator_reports_missing_epubcheck_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "demo.epub"
+            document = BookDocument(
+                title="测试书",
+                chapters=[Chapter(1, "第一章", "正文")],
+            )
+            EpubBuilder().build(document, output)
+
+            ok, errors = EpubValidator().validate(output, str(Path(tmp) / "missing-epubcheck.jar"))
+
+            self.assertFalse(ok)
+            self.assertIn("EPUBCheck 路径不存在", errors[0])
+
     def test_nav_groups_chapters_by_volume(self):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "volume.epub"

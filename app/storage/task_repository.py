@@ -47,6 +47,7 @@ class TaskRepository:
                     row[1] for row in conn.execute("PRAGMA table_info(convert_tasks)").fetchall()
                 }
                 for column_name, column_type in {
+                    "file_size": "INTEGER NOT NULL DEFAULT 0",
                     "title": "TEXT NOT NULL DEFAULT ''",
                     "author": "TEXT NOT NULL DEFAULT ''",
                     "language": "TEXT NOT NULL DEFAULT 'zh-CN'",
@@ -68,9 +69,9 @@ class TaskRepository:
                     INSERT INTO convert_tasks (
                         id, source_path, output_path, source_format, status, progress,
                         error_message, created_at, started_at, finished_at, logs,
-                        title, author, language, publisher, description, keywords, cover_path
+                        file_size, title, author, language, publisher, description, keywords, cover_path
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         output_path = excluded.output_path,
                         status = excluded.status,
@@ -79,6 +80,7 @@ class TaskRepository:
                         started_at = excluded.started_at,
                         finished_at = excluded.finished_at,
                         logs = excluded.logs,
+                        file_size = excluded.file_size,
                         title = excluded.title,
                         author = excluded.author,
                         language = excluded.language,
@@ -99,6 +101,7 @@ class TaskRepository:
                         task.started_at,
                         task.finished_at,
                         "\n".join(task.logs),
+                        task.file_size,
                         task.title,
                         task.author,
                         task.language,
@@ -108,3 +111,41 @@ class TaskRepository:
                         task.cover_path,
                     ),
                 )
+
+    def list_recent_tasks(self, limit: int = 50) -> list[ConvertTask]:
+        with closing(self._connect()) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM convert_tasks
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        tasks: list[ConvertTask] = []
+        for row in rows:
+            task = ConvertTask(
+                source_path=Path(row["source_path"]),
+                output_path=Path(row["output_path"]),
+                source_format=row["source_format"],
+                id=row["id"],
+                status=row["status"],
+                progress=row["progress"],
+                error_message=row["error_message"],
+                file_size=row["file_size"] if "file_size" in row.keys() else 0,
+                title=row["title"],
+                author=row["author"],
+                language=row["language"],
+                publisher=row["publisher"],
+                description=row["description"],
+                keywords=row["keywords"],
+                cover_path=row["cover_path"],
+                created_at=row["created_at"],
+                started_at=row["started_at"] or "",
+                finished_at=row["finished_at"] or "",
+                logs=[line for line in row["logs"].splitlines() if line],
+            )
+            tasks.append(task)
+        return tasks
