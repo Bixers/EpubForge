@@ -1,0 +1,17 @@
+body {
+  font-family: "Microsoft YaHei", "Noto Serif CJK SC", serif;
+  line-height: 1.8;
+  margin: 1.2em;
+}
+
+h1 {
+  border-bottom: 1px solid #ddd;
+  font-size: 1.6em;
+  padding-bottom: 0.3em;
+}
+
+p {
+  margin: 0.4em 0;
+  text-indent: 2em;
+}
+
