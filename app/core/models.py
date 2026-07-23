@@ -16,6 +16,7 @@ class Chapter:
     index: int
     title: str
     content: str
+    content_format: str = "text"
 
 
 @dataclass(slots=True)
@@ -75,4 +76,3 @@ class ConvertTask:
     @property
     def display_title(self) -> str:
         return self.title.strip() or self.source_path.stem
-

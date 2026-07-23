@@ -80,6 +80,22 @@ class TaskManagerTest(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertTrue((output_dir / "demo.epub").exists())
 
+    def test_cli_converts_markdown_and_html(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            markdown = root / "demo.md"
+            html = root / "page.html"
+            markdown.write_text("# 第一章\n正文", encoding="utf-8")
+            html.write_text("<h1>标题</h1><p>内容</p>", encoding="utf-8")
+            output_dir = root / "out"
+
+            with redirect_stdout(io.StringIO()):
+                exit_code = cli_main([str(markdown), str(html), "-o", str(output_dir)])
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue((output_dir / "demo.epub").exists())
+            self.assertTrue((output_dir / "page.epub").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

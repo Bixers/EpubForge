@@ -3,6 +3,8 @@ from __future__ import annotations
 from PySide6.QtWidgets import QListWidget, QPushButton, QTextEdit, QVBoxLayout, QWidget
 
 from app.core.models import AppConfig, ConvertTask
+from app.core.parser.html_parser import HtmlParser
+from app.core.parser.markdown_parser import MarkdownParser
 from app.core.parser.txt_parser import TxtParser
 
 
@@ -29,7 +31,7 @@ class ChapterPreviewPanel(QWidget):
     def set_task(self, task: ConvertTask | None, config: AppConfig) -> None:
         self.task = task
         self.config = config
-        self.setEnabled(task is not None and task.source_format == "txt")
+        self.setEnabled(task is not None and task.source_format in {"txt", "markdown", "html"})
         self.chapter_list.clear()
         self.content_view.clear()
         self.chapters = []
@@ -40,11 +42,8 @@ class ChapterPreviewPanel(QWidget):
         if self.task is None or self.config is None:
             return
         try:
-            document = TxtParser(
-                self.config.chapter_rule,
-                self.config.custom_chapter_regex,
-                self.config.fixed_chapter_chars,
-            ).parse(
+            parser = self._parser_for(self.task.source_format)
+            document = parser.parse(
                 self.task.source_path,
                 title=self.task.display_title,
                 author=self.task.author,
@@ -70,3 +69,14 @@ class ChapterPreviewPanel(QWidget):
             return
         chapter = self.chapters[row]
         self.content_view.setPlainText(chapter.content[:10000])
+
+    def _parser_for(self, source_format: str):
+        if source_format == "txt":
+            return TxtParser(
+                self.config.chapter_rule,
+                self.config.custom_chapter_regex,
+                self.config.fixed_chapter_chars,
+            )
+        if source_format == "markdown":
+            return MarkdownParser()
+        return HtmlParser()

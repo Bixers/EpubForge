@@ -10,7 +10,7 @@ from app.storage.task_repository import TaskRepository
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="EpubForge command line converter")
-    parser.add_argument("sources", nargs="+", help="TXT/MOBI/AZW3 source files")
+    parser.add_argument("sources", nargs="+", help="TXT/MOBI/AZW3/Markdown/HTML source files")
     parser.add_argument("-o", "--output-dir", default="", help="Output directory")
     parser.add_argument("--author", default="", help="Default author")
     parser.add_argument("--language", default="zh-CN", help="Book language")

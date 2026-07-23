@@ -61,12 +61,7 @@ class EpubBuilder:
 """
 
     def _chapter_xhtml(self, document: BookDocument, chapter: Chapter) -> str:
-        paragraphs = []
-        for paragraph in chapter.content.splitlines():
-            stripped = paragraph.strip()
-            if stripped:
-                paragraphs.append(f"  <p>{escape(stripped)}</p>")
-        body = "\n".join(paragraphs) or "  <p></p>"
+        body = self._chapter_body(chapter)
         return f"""<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" lang="{escape(document.language)}">
@@ -82,6 +77,16 @@ class EpubBuilder:
 </html>
 """
 
+    def _chapter_body(self, chapter: Chapter) -> str:
+        if chapter.content_format == "xhtml":
+            return chapter.content.strip() or "  <p></p>"
+        paragraphs = []
+        for paragraph in chapter.content.splitlines():
+            stripped = paragraph.strip()
+            if stripped:
+                paragraphs.append(f"  <p>{escape(stripped)}</p>")
+        return "\n".join(paragraphs) or "  <p></p>"
+
     def _cover_info(self, cover_path: str) -> tuple[Path | None, str, str]:
         if not cover_path:
             return None, "", ""
@@ -96,4 +101,3 @@ class EpubBuilder:
             "image/webp": ".webp",
         }.get(media_type, source.suffix.lower() or ".jpg")
         return source, media_type, f"cover{suffix}"
-

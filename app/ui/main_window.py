@@ -127,7 +127,7 @@ class MainWindow(QMainWindow):
             self,
             "导入文件",
             str(Path.home()),
-            "Books (*.txt *.mobi *.azw3)",
+            "Books (*.txt *.mobi *.azw3 *.md *.markdown *.html *.htm)",
         )
         self.add_paths(paths)
 

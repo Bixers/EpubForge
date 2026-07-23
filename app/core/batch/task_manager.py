@@ -10,6 +10,8 @@ from app.core.epub.epub_builder import EpubBuilder
 from app.core.epub.validator import EpubValidator
 from app.core.format_detector import detect_format
 from app.core.models import AppConfig, ConvertTask, now_text
+from app.core.parser.html_parser import HtmlParser
+from app.core.parser.markdown_parser import MarkdownParser
 from app.core.parser.txt_parser import TxtParser
 from app.core.path_utils import ensure_unique_path, safe_filename
 from app.storage.task_repository import TaskRepository
@@ -98,8 +100,8 @@ class TaskManager:
             task.output_path = self._resolve_output_path(task.output_path)
             task.log(f"输出文件路径：{task.output_path}")
 
-            if task.source_format == "txt":
-                self._convert_txt(task, on_update, stop_event, pause_event)
+            if task.source_format in {"txt", "markdown", "html"}:
+                self._convert_document(task, on_update, stop_event, pause_event)
             elif task.source_format in {"mobi", "azw3"}:
                 self._convert_with_calibre(task, on_update, stop_event, pause_event)
             else:
@@ -130,7 +132,7 @@ class TaskManager:
             task.log(f"转换失败：{task.error_message}")
             self._persist_and_emit(task, on_update)
 
-    def _convert_txt(
+    def _convert_document(
         self,
         task: ConvertTask,
         on_update: TaskCallback | None,
@@ -138,11 +140,7 @@ class TaskManager:
         pause_event: threading.Event,
     ) -> None:
         self._wait_if_paused(pause_event, stop_event)
-        parser = TxtParser(
-            self.config.chapter_rule,
-            self.config.custom_chapter_regex,
-            self.config.fixed_chapter_chars,
-        )
+        parser = self._parser_for(task.source_format)
         document = parser.parse(
             task.source_path,
             title=task.display_title,
@@ -161,6 +159,19 @@ class TaskManager:
         self._wait_if_paused(pause_event, stop_event)
         self._set_status(task, "生成 EPUB 中", 75, on_update)
         EpubBuilder().build(document, task.output_path, self.config.default_css)
+
+    def _parser_for(self, source_format: str):
+        if source_format == "txt":
+            return TxtParser(
+                self.config.chapter_rule,
+                self.config.custom_chapter_regex,
+                self.config.fixed_chapter_chars,
+            )
+        if source_format == "markdown":
+            return MarkdownParser()
+        if source_format == "html":
+            return HtmlParser()
+        raise ValueError(f"不支持的文件格式：{source_format}")
 
     def _convert_with_calibre(
         self,
