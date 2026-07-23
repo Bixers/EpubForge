@@ -1,25 +1,31 @@
 # EpubForge
 
-EpubForge（电子书工坊）是一款面向 Windows 的批量 EPUB 制作与转换工具。当前实现以 MVP 为主：支持 TXT 转 EPUB、批量任务、TXT 编码识别、章节识别、基础元数据、转换日志和 PyInstaller 打包；MOBI/AZW3 通过 Calibre `ebook-convert` 入口转换。
+EpubForge（电子书工坊）是一款面向 Windows 的批量 EPUB 制作与编辑工具。它以 TXT/Markdown/HTML 到 EPUB 为主，同时支持通过 Calibre 调用转换 MOBI/AZW3，提供书籍元数据、章节结构、分卷、正文编辑、批量任务和打包发布能力。
 
-## 功能
+## 当前功能
 
-- 导入单个文件、多个文件、文件夹，支持拖拽导入。
-- 支持 TXT、Markdown、HTML、MOBI、AZW3；TXT/Markdown/HTML 使用内置解析器，MOBI/AZW3 调用 Calibre。
-- 自动识别 UTF-8、GBK、GB18030、Big5 等常见 TXT 编码。
-- 自动识别中文章节、序章、楔子、前言、后记、番外、Chapter 标题；Markdown/HTML 按标题自动分章。
-- 内置多种章节标题识别规则，覆盖 `第一章`、`卷一`、`1. 标题`、`Chapter 1`、`序章/正文/后记` 等形式，并支持多行自定义正则。
-- 章节编辑面板可在转换前调整章节标题和正文内容，转换时优先使用已编辑内容。
-- 支持分卷识别和分卷目录输出，`第一卷`、`卷一`、`Volume 1`、`Part II` 等标题会作为分卷显示。
-- GUI 异常会写入用户目录下的 `EpubForge/crash.log`，转换线程异常会弹窗提示，便于排查闪退。
-- HTML/Markdown 解析会保留游离文本、连续空章节和基础文本结构，避免静默丢内容。
+- 支持导入单个文件、批量文件、文件夹，也支持拖拽导入。
+- 支持 TXT、Markdown、HTML、MOBI、AZW3；TXT/Markdown/HTML 使用内置解析器，MOBI/AZW3 通过 Calibre `ebook-convert` 转换。
+- TXT 自动识别 UTF-8、GBK、GB18030、Big5 等常见编码。
+- 支持多种章节标题识别规则，包括 `第一章`、`第 1 章`、`卷一`、`Volume 1`、`Part II`、`Chapter 1`、序章、正文、后记等。
+- 支持自定义章节正则、多行规则、固定字数分章、空行分章、不自动分章。
+- 支持解析后的章节编辑：修改标题、修改正文、保存修改、还原源文件解析。
+- 支持分卷与章节的树状结构展示。
+- 支持手动新增、修改、删除分卷和章节，并可选择插入到当前位置前、当前位置后、当前分卷末尾或全书末尾。
+- 支持章节多选、批量移动到指定分卷、拖拽排序、上移、下移、合并、拆分、清理文本。
+- 支持识别调试、查找替换、章节质量报告、阅读预览。
+- 支持书名、作者、语言、出版社、关键词、简介、封面等书籍元数据。
+- 支持批量应用书籍设置到选中任务。
+- 支持 CSS 模板和转换预设，便于快速切换网文、出版简洁、固定字数兜底等制作方案。
+- 支持批量任务并发、暂停、继续、停止、失败重试、清理任务。
+- 顶部工具栏会按任务状态启用或禁用按钮，避免空任务时误操作。
+- 支持任务历史恢复，任务记录保存到 SQLite。
+- 支持日志详情、日志筛选、日志导出。
+- 转换过程会保存进度、错误信息和崩溃日志，便于排查闪退。
 - 生成标准 EPUB 结构，包含 `mimetype`、`container.xml`、`content.opf`、`nav.xhtml`、CSS 和章节 XHTML。
-- 支持书名、作者、语言、出版社、关键词、简介、封面元数据。
-- 批量任务支持并发、暂停、继续、停止、失败隔离和日志导出。
-- 配置保存到用户目录，任务记录保存到 SQLite。
-
-<img width="1589" height="940" alt="image" src="https://github.com/user-attachments/assets/2977822a-c25f-452c-86c2-4e545ace42a9" />
-
+- 支持可选 EPUBCheck 校验。
+- 使用 QFluentWidgets 风格界面，右侧编辑区域和章节编辑页分隔条可拖动调整大小。
+- Windows 可执行文件支持应用图标和任务栏图标。
 
 ## 开发运行
 
@@ -28,7 +34,7 @@ py -3 -m pip install -r requirements.txt
 py -3 -m app.main
 ```
 
-未安装 PySide6 时，也可以先用命令行转换验证核心能力：
+也可以使用命令行转换验证核心能力：
 
 ```powershell
 py -3 -m app.main --convert .\demo.txt .\demo.md .\demo.html -o .\output
@@ -38,20 +44,65 @@ py -3 -m app.main --convert .\demo.txt .\demo.md .\demo.html -o .\output
 
 ```powershell
 py -3 -m unittest discover tests
+py -3 -m compileall app tests scripts
 ```
 
-## 打包
+## Windows 打包
+
+默认生成启动更快的目录版：
 
 ```powershell
 .\scripts\build_exe.ps1
 ```
 
-默认输出为启动更快的目录版：`dist/EpubForge/EpubForge.exe`。目录版不会在每次启动时解压 PySide6 运行库，适合作为日常使用版本。
+输出位置：
 
-如确实需要单文件版本，可执行：
+```text
+dist\EpubForge\EpubForge.exe
+```
+
+目录版不会在每次启动时解压 PySide6 运行库，适合作为日常使用版本。
+
+如果确实需要单文件版本：
 
 ```powershell
 .\scripts\build_exe.ps1 -OneFile
 ```
 
-单文件输出位于 `dist/EpubForge.exe`，但启动时需要先解压运行库，打开速度会明显慢于目录版。如需安装包，可用 Inno Setup 打开 `scripts/build_installer.iss` 生成 `EpubForge_Setup_1.0.0.exe`。
+单文件输出位置：
+
+```text
+dist\EpubForge.exe
+```
+
+单文件版启动时需要先解压运行库，打开速度会明显慢于目录版。
+
+## 图标
+
+应用图标位于：
+
+```text
+app\assets\app.ico
+```
+
+打包脚本会把该图标写入可执行文件，并在程序启动时设置窗口和任务栏图标。
+
+## 配置和数据
+
+- 用户配置保存到 `%APPDATA%\EpubForge`。
+- 任务记录保存到 `%APPDATA%\EpubForge\tasks.sqlite3`。
+- GUI 崩溃日志会写入用户目录下的 `EpubForge\crash.log`。
+
+## 常见问题
+
+### 可执行文件打开慢
+
+优先使用默认目录版 `dist\EpubForge\EpubForge.exe`。单文件版每次启动都要解压依赖，启动速度会慢很多。
+
+### MOBI/AZW3 无法转换
+
+需要安装 Calibre，并在设置中配置 `ebook-convert` 路径，或确保 Calibre 已加入系统 PATH。
+
+### 设置窗口或提示框颜色异常
+
+程序启动时会强制使用浅色主题和浅色调色板。如果仍看到黑底黑字，优先确认是否运行的是最新打包目录里的 `dist\EpubForge\EpubForge.exe`。
